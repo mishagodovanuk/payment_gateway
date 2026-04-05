@@ -1,0 +1,15 @@
+/vendor/
+/docs/
+/TECH_REQS.md
+.deptrac.cache
+var/certs/
+composer.lock
+.phpunit.cache/
+coverage/
+var/phpmetrics/
+var/phpmd-*.xml
+var/phpcs-checkstyle.xml
+.php-cs-fixer.cache
+.env
+.idea/
+.vscode/

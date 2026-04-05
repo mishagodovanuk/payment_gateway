@@ -1,0 +1,43 @@
+deptrac:
+  paths:
+    - ./src
+  exclude_files: []
+  layers:
+    - name: Exception
+      collectors:
+        - type: directory
+          value: ./src/Exception/.*
+    - name: Dto
+      collectors:
+        - type: directory
+          value: ./src/Dto/.*
+    - name: Signature
+      collectors:
+        - type: directory
+          value: ./src/Signature/.*
+    - name: Config
+      collectors:
+        - type: directory
+          value: ./src/Config/.*
+    - name: Http
+      collectors:
+        - type: directory
+          value: ./src/Http/.*
+    - name: Application
+      collectors:
+        - type: classLike
+          value: ^Mihod\\PaymentGateway\\SignedMtlsClient$
+  ruleset:
+    Exception: []
+    Dto: []
+    Signature: []
+    Config:
+      - Exception
+    Http:
+      - Config
+    Application:
+      - Http
+      - Signature
+      - Config
+      - Dto
+      - Exception
