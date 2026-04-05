@@ -1,6 +1,6 @@
 # Payment gateway mTLS + HMAC client
 
-Framework-agnostic PHP library for **mutual TLS** (client certificate) HTTP **GET** requests with **HMAC** integrity signatures on the query string. Suited for payment-style APIs that require transport security and request signing.
+PHP library for **mutual TLS** (client certificate) HTTP **GET** requests with **HMAC** integrity signatures on the query string. Suited for payment-style APIs that require transport security and request signing.
 
 ## Requirements
 
@@ -15,24 +15,6 @@ composer require mishagodovanuk/payment_gateway
 ```
 
 PHP namespace remains `Mihod\PaymentGateway\` (Composer package name is `mishagodovanuk/payment_gateway`).
-
-**Before the package is on [Packagist](https://packagist.org)** (or if you prefer Git directly), add the VCS repository in your project `composer.json`:
-
-```json
-{
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/mishagodovanuk/payment_gateway"
-        }
-    ],
-    "require": {
-        "mishagodovanuk/payment_gateway": "dev-main"
-    }
-}
-```
-
-After you [submit the GitHub repo to Packagist](https://packagist.org/packages/submit), others can run `composer require mishagodovanuk/payment_gateway` without a custom `repositories` block.
 
 ## Configuration
 
