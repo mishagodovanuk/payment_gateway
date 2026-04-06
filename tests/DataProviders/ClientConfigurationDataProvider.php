@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace Mihod\PaymentGateway\Tests\DataProviders;
 
-/**
- * Datasets for {@see \Mihod\PaymentGateway\Tests\Unit\Config\ClientConfigurationTest} (invalid fromArray).
- */
 final class ClientConfigurationDataProvider
 {
     private static function missingPath(): string
@@ -24,31 +21,19 @@ final class ClientConfigurationDataProvider
             ['HMAC_SECRET' => ''],
         ];
 
-        yield 'empty signature hash algorithm' => [
-            'SIGNATURE_HASH_ALGO',
-            ['SIGNATURE_HASH_ALGO' => ''],
-        ];
-
-        yield 'non-scalar certificate entry' => [
-            'client certificate',
-            ['MTLS_CLIENT_CERT' => ['not-a-file']],
-        ];
-
         yield 'unreadable certificate path' => [
-            'client certificate',
+            'Client certificate',
             ['MTLS_CLIENT_CERT' => self::missingPath()],
         ];
 
         yield 'unreadable private key path' => [
-            'client private key',
+            'Client private key',
             ['MTLS_CLIENT_KEY' => self::missingPath()],
         ];
 
         yield 'unreadable ca bundle path' => [
             'CA bundle',
-            [
-                'MTLS_CA_BUNDLE' => self::missingPath(),
-            ],
+            ['MTLS_CA_BUNDLE' => self::missingPath()],
         ];
     }
 }

@@ -4,7 +4,7 @@ PHP library for **mutual TLS** (client certificate) HTTP **GET** requests with *
 
 ## Requirements
 
-- PHP 8.1+
+- PHP 8.2+
 - Extensions: `json`, `openssl`
 - Composer
 
@@ -22,11 +22,20 @@ Copy `.env.example` to `.env` and set certificate paths, key passphrase, and `HM
 
 Environment variables override values from the `.env` file when both are present.
 
+### Optional HTTP client settings (Guzzle)
+
+These are optional and have sane defaults:
+
+- `HTTP_ERRORS`: `true|false` (default `true`). When enabled, Guzzle throws exceptions on non-2xx responses.
+- `HTTP_TIMEOUT_SECONDS`: float seconds (default `30`).
+- `HTTP_CONNECT_TIMEOUT_SECONDS`: float seconds (default `10`).
+
 ## Design (interfaces & DTOs)
 
 - **`Mihod\PaymentGateway\Signature\SignerInterface`** — canonical query string + MAC signature (`HmacSigner` is the default).
 - **`Mihod\PaymentGateway\Http\MtlsTransportInterface`** — GET over mTLS (`GuzzleMtlsTransport` via `GuzzleClientFactory`).
 - **`Mihod\PaymentGateway\Dto\SignedHttpResponse`** — immutable result DTO for successful calls (status, body, headers).
+- **`Mihod\PaymentGateway\SignedMtlsClientFactory`** — default wiring (Guzzle + HMAC signer).
 
 `SignedMtlsClient` depends on these abstractions so you can swap implementations in tests or wire custom signers/transports in DI (Laravel, Symfony, Yii2, PHP-DI, etc.).
 
@@ -59,8 +68,9 @@ declare(strict_types=1);
 require __DIR__ . '/vendor/autoload.php';
 
 use Mihod\PaymentGateway\SignedMtlsClient;
+use Mihod\PaymentGateway\SignedMtlsClientFactory;
 
-$client = SignedMtlsClient::fromEnvFile(__DIR__ . '/.env');
+$client = (new SignedMtlsClientFactory())->fromEnvFile(__DIR__ . '/.env');
 
 $response = $client->sendSignedGet('https://client.badssl.com/', [
     'transaction_id' => '12345',
@@ -68,8 +78,8 @@ $response = $client->sendSignedGet('https://client.badssl.com/', [
     'currency' => 'USD',
 ]);
 
-echo $response->statusCode() . PHP_EOL;
-echo $response->body() . PHP_EOL;
+echo $response->statusCode . PHP_EOL;
+echo $response->body . PHP_EOL;
 ```
 
 Run: `php your-script.php`
@@ -83,7 +93,7 @@ declare(strict_types=1);
 require __DIR__ . '/vendor/autoload.php';
 
 use Mihod\PaymentGateway\Config\ClientConfiguration;
-use Mihod\PaymentGateway\SignedMtlsClient;
+use Mihod\PaymentGateway\SignedMtlsClientFactory;
 
 $config = ClientConfiguration::fromArray([
     'MTLS_CLIENT_CERT' => '/absolute/path/client.pem',
@@ -94,14 +104,14 @@ $config = ClientConfiguration::fromArray([
     'SIGNATURE_HEADER_NAME' => 'X-Signature',
 ]);
 
-$client = new SignedMtlsClient($config);
+$client = (new SignedMtlsClientFactory())->create($config);
 
 $response = $client->sendSignedGet('https://api.example.com/check', ['id' => '1']);
 ```
 
 **Option C — use environment variables already set by the shell or systemd** (no file path; merge into `ClientConfiguration::fromArray($_ENV)` after ensuring your process has the same variable names as in `.env.example`).
 
-In all cases the flow is: **build `ClientConfiguration` → `new SignedMtlsClient($config)` → `sendSignedGet($url, $query)` → `SignedHttpResponse` or an exception**.
+In all cases the flow is: **build `ClientConfiguration` → `SignedMtlsClientFactory::create($config)` → `sendSignedGet($url, $query)` → `SignedHttpResponse` or an exception**.
 
 ---
 
@@ -134,9 +144,13 @@ return [
 
 ```php
 use Mihod\PaymentGateway\Config\ClientConfiguration;
-use Mihod\PaymentGateway\SignedMtlsClient;
+use Mihod\PaymentGateway\SignedMtlsClientFactory;
 
-$this->app->singleton(SignedMtlsClient::class, function ($app) {
+$this->app->singleton(SignedMtlsClientFactory::class, function () {
+    return new SignedMtlsClientFactory();
+});
+
+$this->app->singleton(\Mihod\PaymentGateway\SignedMtlsClient::class, function ($app) {
     $c = $app['config']->get('payment_gateway');
 
     $config = ClientConfiguration::fromArray([
@@ -150,7 +164,7 @@ $this->app->singleton(SignedMtlsClient::class, function ($app) {
         'SIGNATURE_HASH_ALGO' => $c['signature_hash_algo'],
     ]);
 
-    return new SignedMtlsClient($config);
+    return $app->make(SignedMtlsClientFactory::class)->create($config);
 });
 ```
 
@@ -205,6 +219,7 @@ namespace App\PaymentGateway;
 
 use Mihod\PaymentGateway\Config\ClientConfiguration;
 use Mihod\PaymentGateway\SignedMtlsClient;
+use Mihod\PaymentGateway\SignedMtlsClientFactory;
 
 final class PaymentGatewayFactory
 {
@@ -224,7 +239,7 @@ final class PaymentGatewayFactory
 
     public static function createClient(ClientConfiguration $configuration): SignedMtlsClient
     {
-        return new SignedMtlsClient($configuration);
+        return (new SignedMtlsClientFactory())->create($configuration);
     }
 }
 ```
@@ -287,16 +302,16 @@ Or register a named component and use `$this->paymentGateway` in controllers if 
 
 1. Ensure certificate paths and `HMAC_SECRET` are available to PHP (env, vault, or config).
 2. Build **`ClientConfiguration::fromArray([...])`** with keys exactly as in `.env.example` (or map your names to those keys).
-3. Instantiate **`new SignedMtlsClient($config)`** once per request or as a **singleton** shared across the app.
-4. Call **`sendSignedGet($url, $query)`**; handle **`SignedHttpResponse`**, **`HttpResponseException`**, and Guzzle exceptions.
+3. Instantiate **`SignedMtlsClientFactory`** once and build **`SignedMtlsClient`** from configuration (or register it as a singleton).
+4. Call **`sendSignedGet($url, $query)`**; handle **`SignedHttpResponse`** and Guzzle exceptions.
 
 Signing uses a **canonical query string**: keys sorted, values cast to string, `http_build_query(..., PHP_QUERY_RFC3986)`. Set `SIGNATURE_HEADER_NAME` to `Authorization` if your API expects that header instead of `X-Signature`.
 
 ## Errors
 
-- Non-2xx HTTP responses throw `Mihod\PaymentGateway\Exception\HttpResponseException` (includes status code and body).
 - Invalid paths or secrets throw `Mihod\PaymentGateway\Exception\InvalidConfigurationException`.
-- Transport failures propagate Guzzle exceptions.
+- With `HTTP_ERRORS=true` (default), non-2xx HTTP responses and transport failures throw Guzzle exceptions
+  (e.g. `GuzzleHttp\Exception\RequestException`).
 
 ## Tests
 
@@ -338,7 +353,7 @@ composer quality:all
 
 ```bash
 composer cs-check      # PHPCS PSR-12 (parallel, sniff codes)
-composer analyse       # PHPStan level 8
+composer analyse       # PHPStan level 9
 composer deptrac       # architectural layers
 composer phpmd         # PHPMD on src/
 composer phpmd:tests   # PHPMD on tests/ (separate ruleset)
@@ -350,7 +365,7 @@ Tooling config lives next to `composer.json` (`phpcs.xml.dist`, `phpstan.neon`, 
 
 Coverage report is written to `coverage/html/index.html`. Requires the **Xdebug** extension with coverage enabled (`php -d xdebug.mode=coverage` is set in the `test:coverage` script). **PCOV** is an alternative if you install `pcov` and use `php -d pcov.enabled=1` instead.
 
-The test suite targets **100% line, method, and class coverage** for executable code under `src/` (interfaces have no executable lines). `EnvironmentLoader` keeps a defensive `file_get_contents === false` branch wrapped in `// @codeCoverageIgnoreStart/End` because PHP 8.2+ may return an empty string for a directory path instead of `false`; the `is_file()` check handles that case.
+The test suite targets **100% line, method, and class coverage** for executable code under `src/` (interfaces have no executable lines).
 
 ## Test data providers
 

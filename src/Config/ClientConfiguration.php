@@ -4,175 +4,97 @@ declare(strict_types=1);
 
 namespace Mihod\PaymentGateway\Config;
 
+use Dotenv\Dotenv;
 use Mihod\PaymentGateway\Exception\InvalidConfigurationException;
+use SensitiveParameter;
 
 /**
- * Transport and signing settings. Construct via {@see self::fromArray()} or
- * {@see EnvironmentLoader::loadConfiguration()} so validation stays in one place.
+ * mTLS transport and HMAC signing configuration.
  */
-final class ClientConfiguration
+final readonly class ClientConfiguration
 {
-    /**
-     * @param non-empty-string $signatureHashAlgorithm Algorithm name for hash_hmac
-     */
     public function __construct(
-        private readonly string $clientCertificatePath,
-        private readonly string $clientPrivateKeyPath,
-        private readonly string $clientPrivateKeyPassphrase,
-        private readonly string $hmacSharedSecret,
-        private readonly bool $verifyServerCertificate = true,
-        private readonly ?string $caBundlePath = null,
-        private readonly string $signatureHeaderName = 'X-Signature',
-        private readonly string $signatureHashAlgorithm = 'sha256',
+        public string $clientCertificatePath,
+        public string $clientPrivateKeyPath,
+        public HttpClientConfiguration $http,
+        #[SensitiveParameter]
+        public string $clientPrivateKeyPassphrase = '',
+        #[SensitiveParameter]
+        public string $hmacSharedSecret = '',
+        public bool $verifyServerCertificate = true,
+        public ?string $caBundlePath = null,
+        public string $signatureHeaderName = 'X-Signature',
+        public string $signatureHashAlgorithm = 'sha256',
     ) {
-        $this->assertReadableFile($this->clientCertificatePath, 'client certificate');
-        $this->assertReadableFile($this->clientPrivateKeyPath, 'client private key');
-
-        if ($this->caBundlePath !== null && $this->caBundlePath !== '') {
-            $this->assertReadableFile($this->caBundlePath, 'CA bundle');
-        }
-
-        if ($this->hmacSharedSecret === '') {
-            throw new InvalidConfigurationException('HMAC shared secret must not be empty.');
-        }
+        self::isReadable($clientCertificatePath, 'Client certificate');
+        self::isReadable($clientPrivateKeyPath, 'Client private key');
+        self::isReadable($caBundlePath, 'CA bundle');
+        self::isNotEmpty($hmacSharedSecret, 'HMAC shared secret');
     }
 
     /**
-     * @param array<mixed, mixed> $values Environment keys
-     */
-    public static function fromArray(array $values): self
-    {
-        $values = self::onlyStringKeys($values);
-        $cert = self::string($values, 'MTLS_CLIENT_CERT');
-        $key = self::string($values, 'MTLS_CLIENT_KEY');
-        $pass = self::string($values, 'MTLS_CLIENT_KEY_PASSPHRASE', '');
-        $secret = self::string($values, 'HMAC_SECRET');
-        $verify = self::bool($values, 'MTLS_VERIFY_SSL', true);
-        $caBundle = self::nullableString($values, 'MTLS_CA_BUNDLE');
-        $header = self::string($values, 'SIGNATURE_HEADER_NAME', 'X-Signature');
-        $algo = self::string($values, 'SIGNATURE_HASH_ALGO', 'sha256');
-
-        if ($algo === '') {
-            throw new InvalidConfigurationException('SIGNATURE_HASH_ALGO must not be empty.');
-        }
-
-        return new self($cert, $key, $pass, $secret, $verify, $caBundle === '' ? null : $caBundle, $header, $algo);
-    }
-
-    public function clientCertificatePath(): string
-    {
-        return $this->clientCertificatePath;
-    }
-
-    public function clientPrivateKeyPath(): string
-    {
-        return $this->clientPrivateKeyPath;
-    }
-
-    public function clientPrivateKeyPassphrase(): string
-    {
-        return $this->clientPrivateKeyPassphrase;
-    }
-
-    public function hmacSharedSecret(): string
-    {
-        return $this->hmacSharedSecret;
-    }
-
-    public function verifyServerCertificate(): bool
-    {
-        return $this->verifyServerCertificate;
-    }
-
-    public function caBundlePath(): ?string
-    {
-        return $this->caBundlePath;
-    }
-
-    public function signatureHeaderName(): string
-    {
-        return $this->signatureHeaderName;
-    }
-
-    public function signatureHashAlgorithm(): string
-    {
-        return $this->signatureHashAlgorithm;
-    }
-
-    /**
-     * @param array<string, string|null> $values
-     */
-    private static function string(array $values, string $key, string $default = ''): string
-    {
-        if (! array_key_exists($key, $values)) {
-            return $default;
-        }
-
-        $value = $values[$key];
-
-        return $value ?? $default;
-    }
-
-    /**
-     * @param array<string, string|null> $values
-     */
-    private static function nullableString(array $values, string $key): ?string
-    {
-        if (! array_key_exists($key, $values)) {
-            return null;
-        }
-
-        $value = $values[$key];
-
-        if ($value === null || $value === '') {
-            return null;
-        }
-
-        return $value;
-    }
-
-    /**
-     * @param array<string, string|null> $values
-     */
-    private static function bool(array $values, string $key, bool $default): bool
-    {
-        if (! array_key_exists($key, $values) || $values[$key] === null || $values[$key] === '') {
-            return $default;
-        }
-
-        $filtered = filter_var($values[$key], FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
-
-        return $filtered ?? $default;
-    }
-
-    private function assertReadableFile(string $path, string $label): void
-    {
-        if ($path === '' || ! is_readable($path)) {
-            throw new InvalidConfigurationException(sprintf('%s path is missing or not readable: %s', $label, $path));
-        }
-    }
-
-    /**
-     * @param array<mixed, mixed> $values
+     * Loads {@see $_ENV} from the given file (mutable Dotenv), then builds configuration.
      *
-     * @return array<string, string|null>
+     * @throws InvalidConfigurationException when the file or required values are invalid
      */
-    private static function onlyStringKeys(array $values): array
+    public static function fromEnvFile(string $path): self
     {
-        $out = [];
+        self::isReadable($path, 'Environment file');
 
-        foreach ($values as $key => $value) {
-            if (! is_string($key)) {
-                continue;
-            }
+        Dotenv::createMutable(dirname($path), basename($path))->load();
 
-            if ($value === null) {
-                $out[$key] = null;
-            } elseif (is_scalar($value)) {
-                $out[$key] = (string) $value;
-            }
+        return self::fromArray($_ENV);
+    }
+
+    /**
+     * @param array{
+     *   MTLS_CLIENT_CERT?: string,
+     *   MTLS_CLIENT_KEY?: string,
+     *   MTLS_CLIENT_KEY_PASSPHRASE?: string,
+     *   HMAC_SECRET?: string,
+     *   MTLS_VERIFY_SSL?: string,
+     *   MTLS_CA_BUNDLE?: string,
+     *   SIGNATURE_HEADER_NAME?: string,
+     *   SIGNATURE_HASH_ALGO?: string,
+     *   HTTP_ERRORS?: string,
+     *   HTTP_TIMEOUT_SECONDS?: string,
+     *   HTTP_CONNECT_TIMEOUT_SECONDS?: string
+     * } $env Typically {@see $_ENV} or Dotenv output (string values only).
+     *
+     * @throws InvalidConfigurationException when paths are unreadable or HMAC secret is empty
+     */
+    public static function fromArray(array $env): self
+    {
+        $caBundlePath = $env['MTLS_CA_BUNDLE'] ?? '';
+        $mtlsVerifySsl = $env['MTLS_VERIFY_SSL'] ?? '';
+        $httpConfig = HttpClientConfiguration::fromArray($env);
+
+        return new self(
+            clientCertificatePath: $env['MTLS_CLIENT_CERT'] ?? '',
+            clientPrivateKeyPath: $env['MTLS_CLIENT_KEY'] ?? '',
+            http: $httpConfig,
+            clientPrivateKeyPassphrase: $env['MTLS_CLIENT_KEY_PASSPHRASE'] ?? '',
+            hmacSharedSecret: $env['HMAC_SECRET'] ?? '',
+            verifyServerCertificate: $mtlsVerifySsl !== ''
+                ? filter_var($mtlsVerifySsl, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? true
+                : true,
+            caBundlePath: $caBundlePath !== '' ? $caBundlePath : null,
+            signatureHeaderName: $env['SIGNATURE_HEADER_NAME'] ?? 'X-Signature',
+            signatureHashAlgorithm: $env['SIGNATURE_HASH_ALGO'] ?? 'sha256',
+        );
+    }
+
+    private static function isReadable(?string $path, string $label): void
+    {
+        if ($path !== null && !is_readable($path)) {
+            throw new InvalidConfigurationException("{$label} is not readable: {$path}");
         }
+    }
 
-        return $out;
+    private static function isNotEmpty(string $value, string $label): void
+    {
+        if ($value === '') {
+            throw new InvalidConfigurationException("{$label} must not be empty.");
+        }
     }
 }

@@ -12,8 +12,8 @@ use Psr\Http\Message\ResponseInterface;
 interface MtlsTransportInterface
 {
     /**
-     * @param array<string, scalar|null> $query Query string parameters
-     * @param array<string, string>      $headers Extra headers (e.g. signature)
+     * @param array<string, scalar|null> $query   Query parameters
+     * @param array<string, string>      $headers Extra request headers (e.g. signature)
      */
     public function sendGet(string $url, array $query, array $headers): ResponseInterface;
 }

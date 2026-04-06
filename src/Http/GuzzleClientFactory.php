@@ -8,39 +8,28 @@ use GuzzleHttp\Client;
 use Mihod\PaymentGateway\Config\ClientConfiguration;
 
 /**
- * Create a Guzzle client with mTLS options. No base URI — each request supplies a full URL.
+ * Builds a Guzzle {@see Client} with client certificate (mTLS) and verify options.
  */
-final class GuzzleClientFactory
+final readonly class GuzzleClientFactory
 {
-    public function createTransport(ClientConfiguration $config): MtlsTransportInterface
-    {
-        return new GuzzleMtlsTransport($this->createClient($config));
-    }
-
     public function createClient(ClientConfiguration $config): Client
     {
-        $cert = $config->clientCertificatePath();
-        $key = $config->clientPrivateKeyPath();
-        $pass = $config->clientPrivateKeyPassphrase();
-
-        $certOption = $pass !== '' ? [$cert, $pass] : $cert;
-        $keyOption = $pass !== '' ? [$key, $pass] : $key;
-
-        $verify = $config->verifyServerCertificate();
-        $caBundle = $config->caBundlePath();
-
-        $verifyOption = false;
-
-        if ($verify) {
-            $verifyOption = $caBundle !== null && $caBundle !== '' ? $caBundle : true;
-        }
+        $privateKeyPassphrase = $config->clientPrivateKeyPassphrase;
+        $tlsCredential = static fn(string $path): array|string => $privateKeyPassphrase !== ''
+            ? [$path, $privateKeyPassphrase]
+            : $path;
 
         return new Client([
-            'cert' => $certOption,
-            'ssl_key' => $keyOption,
-            'verify' => $verifyOption,
-            'http_errors' => false,
-            'timeout' => 30.0,
+            'cert' => $tlsCredential($config->clientCertificatePath),
+            'ssl_key' => $tlsCredential($config->clientPrivateKeyPath),
+            'verify' => match (true) {
+                !$config->verifyServerCertificate => false,
+                $config->caBundlePath !== null => $config->caBundlePath,
+                default => true,
+            },
+            'http_errors' => $config->http->httpErrors,
+            'timeout' => $config->http->timeoutSeconds,
+            'connect_timeout' => $config->http->connectTimeoutSeconds,
         ]);
     }
 }

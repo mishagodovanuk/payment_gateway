@@ -6,26 +6,20 @@ namespace Mihod\PaymentGateway\Tests\Unit\Http;
 
 use Mihod\PaymentGateway\Config\ClientConfiguration;
 use Mihod\PaymentGateway\Http\GuzzleClientFactory;
-use Mihod\PaymentGateway\Http\GuzzleMtlsTransport;
 use Mihod\PaymentGateway\Tests\DataProviders\GuzzleClientFactoryDataProvider;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProviderExternal;
 use PHPUnit\Framework\TestCase;
 
 #[CoversClass(GuzzleClientFactory::class)]
-#[CoversClass(GuzzleMtlsTransport::class)]
 final class GuzzleClientFactoryTest extends TestCase
 {
     private string $certFile;
-
     private string $keyFile;
-
     private string $caFile;
 
     protected function setUp(): void
     {
-        parent::setUp();
-
         $this->certFile = tempnam(sys_get_temp_dir(), 'mtls') ?: self::fail('tempnam');
         $this->keyFile = tempnam(sys_get_temp_dir(), 'mtls') ?: self::fail('tempnam');
         $this->caFile = tempnam(sys_get_temp_dir(), 'ca') ?: self::fail('tempnam');
@@ -39,29 +33,11 @@ final class GuzzleClientFactoryTest extends TestCase
         @unlink($this->certFile);
         @unlink($this->keyFile);
         @unlink($this->caFile);
-
-        parent::tearDown();
-    }
-
-    public function testCreateTransportWrapsGuzzleMtlsTransport(): void
-    {
-        $config = ClientConfiguration::fromArray([
-            'MTLS_CLIENT_CERT' => $this->certFile,
-            'MTLS_CLIENT_KEY' => $this->keyFile,
-            'HMAC_SECRET' => 's',
-        ]);
-
-        $factory = new GuzzleClientFactory();
-        $transport = $factory->createTransport($config);
-
-        self::assertInstanceOf(GuzzleMtlsTransport::class, $transport);
     }
 
     #[DataProviderExternal(GuzzleClientFactoryDataProvider::class, 'createClientSslOptionsCases')]
-    public function testCreateClientAppliesSslOptions(
-        array $overrides,
-        array $expect
-    ): void {
+    public function testCreateClientAppliesSslOptions(array $overrides, array $expect): void
+    {
         $defaults = [
             'MTLS_CLIENT_CERT' => $this->certFile,
             'MTLS_CLIENT_KEY' => $this->keyFile,
@@ -79,7 +55,6 @@ final class GuzzleClientFactoryTest extends TestCase
         $cfg = $client->getConfig();
 
         $expectedVerify = $expect['verify'];
-
         if ($expectedVerify === GuzzleClientFactoryDataProvider::PLACEHOLDER_CA_FILE) {
             $expectedVerify = $this->caFile;
         }

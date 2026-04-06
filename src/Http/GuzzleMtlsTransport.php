@@ -9,12 +9,12 @@ use GuzzleHttp\Exception\GuzzleException;
 use Psr\Http\Message\ResponseInterface;
 
 /**
- * Guzzle-backed {@see MtlsTransportInterface}. Built via {@see GuzzleClientFactory}.
+ * {@see MtlsTransportInterface} backed by Guzzle {@see Client}.
  */
-final class GuzzleMtlsTransport implements MtlsTransportInterface
+final readonly class GuzzleMtlsTransport implements MtlsTransportInterface
 {
     public function __construct(
-        private readonly Client $client
+        private Client $client,
     ) {
     }
 

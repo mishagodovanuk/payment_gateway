@@ -15,15 +15,11 @@ use PHPUnit\Framework\TestCase;
 final class ClientConfigurationTest extends TestCase
 {
     private string $certFile;
-
     private string $keyFile;
-
     private string $caFile;
 
     protected function setUp(): void
     {
-        parent::setUp();
-
         $this->certFile = tempnam(sys_get_temp_dir(), 'mtls') ?: self::fail('tempnam');
         $this->keyFile = tempnam(sys_get_temp_dir(), 'mtls') ?: self::fail('tempnam');
         $this->caFile = tempnam(sys_get_temp_dir(), 'ca') ?: self::fail('tempnam');
@@ -37,11 +33,9 @@ final class ClientConfigurationTest extends TestCase
         @unlink($this->certFile);
         @unlink($this->keyFile);
         @unlink($this->caFile);
-
-        parent::tearDown();
     }
 
-    public function testFromArrayBuildsConfigurationAndGettersReturnValues(): void
+    public function testFromArrayBuildsConfiguration(): void
     {
         $config = ClientConfiguration::fromArray([
             'MTLS_CLIENT_CERT' => $this->certFile,
@@ -52,21 +46,19 @@ final class ClientConfigurationTest extends TestCase
             'MTLS_CA_BUNDLE' => $this->caFile,
             'SIGNATURE_HEADER_NAME' => 'X-Custom',
             'SIGNATURE_HASH_ALGO' => 'sha384',
-            99 => 'ignored-non-string-key-handled-in-onlyStringKeys',
-            1 => 'ignored-int-key',
         ]);
 
-        self::assertSame($this->certFile, $config->clientCertificatePath());
-        self::assertSame($this->keyFile, $config->clientPrivateKeyPath());
-        self::assertSame('pk-pass', $config->clientPrivateKeyPassphrase());
-        self::assertSame('hmac', $config->hmacSharedSecret());
-        self::assertFalse($config->verifyServerCertificate());
-        self::assertSame($this->caFile, $config->caBundlePath());
-        self::assertSame('X-Custom', $config->signatureHeaderName());
-        self::assertSame('sha384', $config->signatureHashAlgorithm());
+        self::assertSame($this->certFile, $config->clientCertificatePath);
+        self::assertSame($this->keyFile, $config->clientPrivateKeyPath);
+        self::assertSame('pk-pass', $config->clientPrivateKeyPassphrase);
+        self::assertSame('hmac', $config->hmacSharedSecret);
+        self::assertFalse($config->verifyServerCertificate);
+        self::assertSame($this->caFile, $config->caBundlePath);
+        self::assertSame('X-Custom', $config->signatureHeaderName);
+        self::assertSame('sha384', $config->signatureHashAlgorithm);
     }
 
-    public function testFromArrayUsesDefaultsWhenKeysMissing(): void
+    public function testFromArrayUsesDefaults(): void
     {
         $config = ClientConfiguration::fromArray([
             'MTLS_CLIENT_CERT' => $this->certFile,
@@ -74,14 +66,14 @@ final class ClientConfigurationTest extends TestCase
             'HMAC_SECRET' => 'secret',
         ]);
 
-        self::assertTrue($config->verifyServerCertificate());
-        self::assertNull($config->caBundlePath());
-        self::assertSame('X-Signature', $config->signatureHeaderName());
-        self::assertSame('sha256', $config->signatureHashAlgorithm());
-        self::assertSame('', $config->clientPrivateKeyPassphrase());
+        self::assertTrue($config->verifyServerCertificate);
+        self::assertNull($config->caBundlePath);
+        self::assertSame('X-Signature', $config->signatureHeaderName);
+        self::assertSame('sha256', $config->signatureHashAlgorithm);
+        self::assertSame('', $config->clientPrivateKeyPassphrase);
     }
 
-    public function testFromArrayBoolFallsBackToDefaultWhenValueIsNotABooleanString(): void
+    public function testFromArrayBoolFallback(): void
     {
         $config = ClientConfiguration::fromArray([
             'MTLS_CLIENT_CERT' => $this->certFile,
@@ -90,10 +82,10 @@ final class ClientConfigurationTest extends TestCase
             'MTLS_VERIFY_SSL' => 'not-a-boolean',
         ]);
 
-        self::assertTrue($config->verifyServerCertificate());
+        self::assertTrue($config->verifyServerCertificate);
     }
 
-    public function testFromArrayEmptyCaStringBecomesNull(): void
+    public function testFromArrayEmptyCaBecomesNull(): void
     {
         $config = ClientConfiguration::fromArray([
             'MTLS_CLIENT_CERT' => $this->certFile,
@@ -102,7 +94,7 @@ final class ClientConfigurationTest extends TestCase
             'MTLS_CA_BUNDLE' => '',
         ]);
 
-        self::assertNull($config->caBundlePath());
+        self::assertNull($config->caBundlePath);
     }
 
     #[DataProviderExternal(ClientConfigurationDataProvider::class, 'invalidFromArrayCases')]
@@ -120,33 +112,29 @@ final class ClientConfigurationTest extends TestCase
         ClientConfiguration::fromArray(array_merge($base, $overrides));
     }
 
-    public function testNullOptionalStringKeysUseDefaults(): void
+    public function testFromEnvFileThrowsWhenNotReadable(): void
     {
-        $config = ClientConfiguration::fromArray([
-            'MTLS_CLIENT_CERT' => $this->certFile,
-            'MTLS_CLIENT_KEY' => $this->keyFile,
-            'HMAC_SECRET' => 'secret',
-            'MTLS_CLIENT_KEY_PASSPHRASE' => null,
-            'SIGNATURE_HEADER_NAME' => null,
-            'SIGNATURE_HASH_ALGO' => null,
-            'MTLS_VERIFY_SSL' => null,
-        ]);
+        $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessage('not readable');
 
-        self::assertSame('', $config->clientPrivateKeyPassphrase());
-        self::assertSame('X-Signature', $config->signatureHeaderName());
-        self::assertSame('sha256', $config->signatureHashAlgorithm());
-        self::assertTrue($config->verifyServerCertificate());
+        ClientConfiguration::fromEnvFile('/no/such/file');
     }
 
-    public function testEmptyStringVerifySslUsesDefault(): void
+    public function testFromEnvFileLoadsConfiguration(): void
     {
-        $config = ClientConfiguration::fromArray([
-            'MTLS_CLIENT_CERT' => $this->certFile,
-            'MTLS_CLIENT_KEY' => $this->keyFile,
-            'HMAC_SECRET' => 'secret',
-            'MTLS_VERIFY_SSL' => '',
-        ]);
+        $envPath = tempnam(sys_get_temp_dir(), 'env') ?: self::fail('tempnam');
+        file_put_contents($envPath, implode("\n", [
+            "MTLS_CLIENT_CERT={$this->certFile}",
+            "MTLS_CLIENT_KEY={$this->keyFile}",
+            "HMAC_SECRET=test-secret",
+        ]));
 
-        self::assertTrue($config->verifyServerCertificate());
+        try {
+            $config = ClientConfiguration::fromEnvFile($envPath);
+            self::assertSame($this->certFile, $config->clientCertificatePath);
+            self::assertSame('test-secret', $config->hmacSharedSecret);
+        } finally {
+            @unlink($envPath);
+        }
     }
 }

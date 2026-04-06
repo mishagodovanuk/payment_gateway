@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
 #[CoversClass(SignedHttpResponse::class)]
 final class SignedHttpResponseTest extends TestCase
 {
-    public function testAccessorsReturnConstructorValues(): void
+    public function testPropertiesReturnConstructorValues(): void
     {
         $headers = [
             'content-type' => 'text/plain',
@@ -20,8 +20,8 @@ final class SignedHttpResponseTest extends TestCase
 
         $r = new SignedHttpResponse(201, 'payload', $headers);
 
-        self::assertSame(201, $r->statusCode());
-        self::assertSame('payload', $r->body());
-        self::assertSame($headers, $r->headers());
+        self::assertSame(201, $r->statusCode);
+        self::assertSame('payload', $r->body);
+        self::assertSame($headers, $r->headers);
     }
 }

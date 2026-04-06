@@ -4,24 +4,28 @@ declare(strict_types=1);
 
 namespace Mihod\PaymentGateway\Tests\Unit;
 
+use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use Mihod\PaymentGateway\Config\ClientConfiguration;
-use Mihod\PaymentGateway\Exception\HttpResponseException;
 use Mihod\PaymentGateway\Http\MtlsTransportInterface;
+use Mihod\PaymentGateway\Signature\HmacSigner;
 use Mihod\PaymentGateway\SignedMtlsClient;
+use Mihod\PaymentGateway\SignedMtlsClientFactory;
+use Mihod\PaymentGateway\Tests\DataProviders\SignedMtlsClientDataProvider;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProviderExternal;
 use PHPUnit\Framework\TestCase;
 
 #[CoversClass(SignedMtlsClient::class)]
+#[CoversClass(SignedMtlsClientFactory::class)]
 final class SignedMtlsClientTest extends TestCase
 {
     private string $certFile;
-
     private string $keyFile;
 
     protected function setUp(): void
     {
-        parent::setUp();
         $this->certFile = tempnam(sys_get_temp_dir(), 'mtls') ?: self::fail('tempnam');
         $this->keyFile = tempnam(sys_get_temp_dir(), 'mtls') ?: self::fail('tempnam');
         file_put_contents($this->certFile, '-----BEGIN CERTIFICATE-----');
@@ -32,60 +36,41 @@ final class SignedMtlsClientTest extends TestCase
     {
         @unlink($this->certFile);
         @unlink($this->keyFile);
-
-        parent::tearDown();
     }
 
-    public function testSendSignedGetAddsSignatureHeaderAndAccepts2xx(): void
+    #[DataProviderExternal(SignedMtlsClientDataProvider::class, 'signedGetSignatureCases')]
+    public function testSendSignedGetAddsSignatureHeader(string $algorithm, array $query, string $secret): void
     {
-        $expectedSig = hash_hmac(
-            'sha256',
-            'amount=99.99&currency=USD&transaction_id=12345',
-            'secret',
-            false
-        );
+        $expectedSig = hash_hmac($algorithm, 'amount=99.99&currency=USD&transaction_id=12345', $secret);
 
         $transport = $this->createMock(MtlsTransportInterface::class);
         $transport->expects($this->once())
             ->method('sendGet')
             ->with(
                 'https://example.test/api/check',
-                [
-                    'transaction_id' => '12345',
-                    'amount' => '99.99',
-                    'currency' => 'USD',
-                ],
-                ['X-Signature' => $expectedSig]
+                $query,
+                ['X-Signature' => $expectedSig],
             )
             ->willReturn(new Response(200, ['Content-Type' => 'text/plain'], 'ok'));
 
         $config = ClientConfiguration::fromArray([
             'MTLS_CLIENT_CERT' => $this->certFile,
             'MTLS_CLIENT_KEY' => $this->keyFile,
-            'MTLS_CLIENT_KEY_PASSPHRASE' => '',
-            'HMAC_SECRET' => 'secret',
-            'MTLS_VERIFY_SSL' => 'true',
-            'SIGNATURE_HEADER_NAME' => 'X-Signature',
+            'HMAC_SECRET' => $secret,
         ]);
 
-        $gateway = new SignedMtlsClient($config, transport: $transport);
-        $response = $gateway->sendSignedGet('https://example.test/api/check', [
-            'transaction_id' => '12345',
-            'amount' => '99.99',
-            'currency' => 'USD',
-        ]);
+        $client = new SignedMtlsClient($config, new HmacSigner(), $transport);
+        $response = $client->sendSignedGet('https://example.test/api/check', $query);
 
-        self::assertSame(200, $response->statusCode());
-        self::assertSame('ok', $response->body());
+        self::assertSame(200, $response->statusCode);
+        self::assertSame('ok', $response->body);
     }
 
-    public function testSendSignedGetNormalizesMultiValueHeadersToArray(): void
+    #[DataProviderExternal(SignedMtlsClientDataProvider::class, 'headerNormalizationCases')]
+    public function testNormalizesMultiValueHeaders(array $rawHeaders, array $expectedHeaders): void
     {
         $transport = $this->createMock(MtlsTransportInterface::class);
-        $transport->method('sendGet')->willReturn(new Response(200, [
-            'Content-Type' => ['application/json'],
-            'Set-Cookie' => ['a=1', 'b=2'],
-        ], '{}'));
+        $transport->method('sendGet')->willReturn(new Response(200, $rawHeaders, '{}'));
 
         $config = ClientConfiguration::fromArray([
             'MTLS_CLIENT_CERT' => $this->certFile,
@@ -93,36 +78,39 @@ final class SignedMtlsClientTest extends TestCase
             'HMAC_SECRET' => 'secret',
         ]);
 
-        $gateway = new SignedMtlsClient($config, transport: $transport);
-        $response = $gateway->sendSignedGet('https://example.test/', []);
+        $client = new SignedMtlsClient($config, new HmacSigner(), $transport);
+        $response = $client->sendSignedGet('https://example.test/', []);
 
-        self::assertSame(['content-type' => 'application/json', 'set-cookie' => ['a=1', 'b=2']], $response->headers());
+        self::assertSame($expectedHeaders, $response->headers);
     }
 
-    public function testFromEnvFileBuildsClientFromDotenvFile(): void
+    public function testFactoryFromEnvFile(): void
     {
         $envPath = tempnam(sys_get_temp_dir(), 'pgwenv') ?: self::fail('tempnam');
-        $content = "MTLS_CLIENT_CERT={$this->certFile}\n";
-        $content .= "MTLS_CLIENT_KEY={$this->keyFile}\n";
-        $content .= "HMAC_SECRET=from-env\n";
-
-        file_put_contents($envPath, $content);
+        file_put_contents($envPath, implode("\n", [
+            "MTLS_CLIENT_CERT={$this->certFile}",
+            "MTLS_CLIENT_KEY={$this->keyFile}",
+            "HMAC_SECRET=from-env",
+        ]));
 
         $transport = $this->createMock(MtlsTransportInterface::class);
         $transport->expects($this->once())->method('sendGet')->willReturn(new Response(200, [], 'done'));
 
-        $client = SignedMtlsClient::fromEnvFile($envPath, $transport);
+        $factory = new SignedMtlsClientFactory();
+        $client = $factory->fromEnvFile($envPath, $transport);
         $response = $client->sendSignedGet('https://example.test/', []);
 
-        self::assertSame('done', $response->body());
+        self::assertSame('done', $response->body);
 
         @unlink($envPath);
     }
 
-    public function testNon2xxResponseThrows(): void
+    public function testTransportExceptionPropagates(): void
     {
         $transport = $this->createMock(MtlsTransportInterface::class);
-        $transport->method('sendGet')->willReturn(new Response(500, [], 'error'));
+        $transport->method('sendGet')->willThrowException(
+            new RequestException('Server error', new Request('GET', '/'), new Response(500))
+        );
 
         $config = ClientConfiguration::fromArray([
             'MTLS_CLIENT_CERT' => $this->certFile,
@@ -130,9 +118,9 @@ final class SignedMtlsClientTest extends TestCase
             'HMAC_SECRET' => 'secret',
         ]);
 
-        $gateway = new SignedMtlsClient($config, transport: $transport);
+        $client = new SignedMtlsClient($config, new HmacSigner(), $transport);
 
-        $this->expectException(HttpResponseException::class);
-        $gateway->sendSignedGet('https://example.test/', []);
+        $this->expectException(RequestException::class);
+        $client->sendSignedGet('https://example.test/', []);
     }
 }
